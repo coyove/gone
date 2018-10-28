@@ -3,17 +3,19 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	_ "image/jpeg"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"strconv"
 )
 
-var listen = flag.String("l", ":8080", "")
-var configfile = flag.String("c", "", "")
+var listen = flag.String("l", ":8080", "Listening address")
+var configfile = flag.String("c", "", "Config file to load")
 var o *oneManager
 var conf *config
 
@@ -38,6 +40,18 @@ func prettySize(size int) string {
 	return strconv.FormatFloat(float64(size)/1024/1024/1024, 'f', 1, 64) + "G"
 }
 
+func strlen(s string) int {
+	ln := 0.0
+	for _, r := range s {
+		if r < 0x2e80 { // rough range
+			ln++
+		} else {
+			ln += 1.66
+		}
+	}
+	return int(ln)
+}
+
 func main() {
 	flag.Parse()
 	log.SetFlags(log.Lshortfile | log.Lmicroseconds)
@@ -59,7 +73,12 @@ func main() {
 	if conf.Password == "" {
 		log.Fatalln("Please specify a admin password")
 	}
-
+	if conf.ClientID == "" {
+		log.Fatalln("Please specify a client ID")
+	}
+	if conf.ClientSecret == "" {
+		log.Fatalln("Please specify a client secret")
+	}
 	conf.redir, err = url.Parse(conf.RedirURL)
 	if err != nil {
 		log.Fatalln(err)
@@ -84,5 +103,15 @@ func main() {
 	http.HandleFunc("/", Main)
 
 	log.Println("Hello", *listen)
+
+	if _, err := os.Stat(conf.ClientID + ".token"); err != nil {
+		fmt.Println()
+		fmt.Println("***********************************************************")
+		fmt.Println("*     If this is your first time running gone server      *")
+		fmt.Println("* Follow the belowed URL to sign in the Microsoft account *")
+		fmt.Println("***********************************************************")
+		fmt.Println("https://" + conf.redir.Hostname() + "/?auth=" + conf.Password)
+		fmt.Println()
+	}
 	http.ListenAndServe(*listen, nil)
 }

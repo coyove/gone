@@ -31,7 +31,9 @@ func writeInfo(w http.ResponseWriter) {
 	w.Write([]byte(`<html>
 		<head><meta charset="UTF-8"><title>Info</title></head>
 		<body bgcolor="white">
-		<pre>`))
+		<pre style="white-space:wrap">`))
+
+	w.Write([]byte("Access:\n" + o.access + "\nRefresh:\n" + o.refresh + "\n"))
 
 	o.cache.Info(func(k lru.Key, v interface{}, hits, weight int64) {
 		w.Write([]byte(fmt.Sprintf("%6d %s\n", hits, k)))
@@ -39,6 +41,9 @@ func writeInfo(w http.ResponseWriter) {
 
 	w.Write([]byte("</pre></body></html>"))
 }
+
+func _orderAsc(b bool) bool  { return b }
+func _orderDesc(b bool) bool { return !b }
 
 func Main(w http.ResponseWriter, r *http.Request) {
 	if img := r.FormValue("image"); img != "" {
@@ -65,10 +70,10 @@ func Main(w http.ResponseWriter, r *http.Request) {
 	}
 
 	path := r.URL.Path[1:]
-	order, revorder, orderfunc := r.FormValue("o"), "d", func(b bool) bool { return b }
+	order, revorder, orderfunc := r.FormValue("o"), "d", _orderAsc
 	if order == "d" {
 		revorder = "a"
-		orderfunc = func(b bool) bool { return !b }
+		orderfunc = _orderDesc
 	}
 
 	if path == "" {
@@ -95,10 +100,9 @@ func Main(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(fmt.Sprintf(`<html>
 <head><meta charset="UTF-8"><title>Index of %s</title></head>
 <body bgcolor="white">
-<h1 id=indexof>Index of %s</h1>%s<pre>
-`, upath, upath, conf.Header)))
+<h1 id=indexof>Index of %s</h1>%s<pre>`, upath, upath, conf.Header)))
 
-	maxNameLen, maxSizeLen := 4, 2
+	maxNameLen, maxSizeLen := 6, 2
 	for i := len(x.Values) - 1; i >= 0; i-- {
 		item := x.Values[i]
 		if conf.ignoreRegex != nil && conf.ignoreRegex.MatchString(item.Name) {
@@ -106,8 +110,12 @@ func Main(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		if len(item.Name) > maxNameLen {
-			maxNameLen = len(item.Name)
+		l := strlen(item.Name)
+		if item.Folder != nil {
+			l++
+		}
+		if l > maxNameLen {
+			maxNameLen = l
 		}
 		if s := prettySize(item.Size); len(s) > maxSizeLen {
 			maxSizeLen = len(s)
@@ -116,13 +124,38 @@ func Main(w http.ResponseWriter, r *http.Request) {
 
 	switch r.FormValue("c") {
 	case "n":
-		sort.Slice(x.Values, func(i, j int) bool { return orderfunc(x.Values[i].Name < x.Values[j].Name) })
+		sort.Slice(x.Values, func(i, j int) bool {
+			if x.Values[i].Folder != nil && x.Values[j].Folder == nil {
+				return true
+			}
+			if x.Values[i].Folder == nil && x.Values[j].Folder != nil {
+				return false
+			}
+			return orderfunc(x.Values[i].Name < x.Values[j].Name)
+		})
 	case "t":
 		sort.Slice(x.Values, func(i, j int) bool {
+			if x.Values[i].Folder != nil && x.Values[j].Folder == nil {
+				return true
+			}
+			if x.Values[i].Folder == nil && x.Values[j].Folder != nil {
+				return false
+			}
 			return orderfunc(x.Values[i].LastModifiedDateTime < x.Values[j].LastModifiedDateTime)
 		})
 	case "s":
-		sort.Slice(x.Values, func(i, j int) bool { return orderfunc(x.Values[i].Size < x.Values[j].Size) })
+		sort.Slice(x.Values, func(i, j int) bool {
+			if x.Values[i].Folder != nil && x.Values[j].Folder == nil {
+				return true
+			}
+			if x.Values[i].Folder == nil && x.Values[j].Folder != nil {
+				return false
+			}
+			if x.Values[i].Folder == nil && x.Values[j].Folder == nil {
+				return orderfunc(x.Values[i].Size < x.Values[j].Size)
+			}
+			return orderfunc(x.Values[i].Folder.ChildCount < x.Values[j].Folder.ChildCount)
+		})
 	}
 
 	w.Write([]byte(
@@ -136,15 +169,16 @@ func Main(w http.ResponseWriter, r *http.Request) {
 
 	for _, item := range x.Values {
 		href := item.DownloadURL
+		name := item.Name
 
 		if item.Folder != nil {
-			href = path + item.Name
-			item.Name += "/"
+			href = path + name
+			name += "/"
 		}
 
-		w.Write([]byte(fmt.Sprintf("<img src='?image=%s'> ", nameIcon(item.Name, item.Folder != nil))))
-		w.Write([]byte(fmt.Sprintf("<a href='%s'>%s</a>", href, template.HTMLEscapeString(item.Name))))
-		w.Write(bytes.Repeat([]byte(" "), maxNameLen+1-len(item.Name)))
+		w.Write([]byte(fmt.Sprintf("<img src='?image=%s'> ", nameIcon(name, item.Folder != nil))))
+		w.Write([]byte(fmt.Sprintf("<a href='%s'>%s</a>", href, template.HTMLEscapeString(name))))
+		w.Write(bytes.Repeat([]byte(" "), maxNameLen+1-strlen(name)))
 		w.Write([]byte(item.LastModifiedDateTime[:10] + " " + item.LastModifiedDateTime[11:16]))
 
 		size := prettySize(item.Size)

@@ -45,7 +45,7 @@ type driveItem struct {
 type driveItems struct {
 	ts int64
 
-	Values []driveItem `json:"value"`
+	Values []*driveItem `json:"value"`
 	Error  struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`
