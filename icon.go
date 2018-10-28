@@ -56,7 +56,7 @@ var mimeMapping = map[string]string{
 	".ppt": "powerpoint", ".pptx": "powerpoint",
 	".xls": "excel", ".csv": "excel", ".xlsx": "excel",
 	".jpg": "image", ".jpeg": "image", ".png": "image", ".gif": "image", ".webp": "image", ".tiff": "image", ".bmp": "image",
-	".zip": "archive", ".tar": "archive", ".gz": "archive", ".bz": "archive", ".bz2": "archive", ".7z": "archive", ".rar": "archive", ".deb": "archive",
+	".iso": "archive", ".zip": "archive", ".tar": "archive", ".gz": "archive", ".bz": "archive", ".bz2": "archive", ".7z": "archive", ".rar": "archive", ".deb": "archive",
 }
 
 func nameIcon(name string, folder bool) string {

@@ -1,5 +1,10 @@
 package main
 
+import (
+	"net/url"
+	"regexp"
+)
+
 type _folder struct {
 	ChildCount int `json:"childCount"`
 }
@@ -51,7 +56,13 @@ type config struct {
 	ClientID     string
 	ClientSecret string
 	RedirURL     string
+	redir        *url.URL
 	Password     string
+	Header       string
+	Footer       string
+	Ignore       string
+	Favicon      string
+	ignoreRegex  *regexp.Regexp
 	CacheSize    int
 	CacheTTL     int
 }
