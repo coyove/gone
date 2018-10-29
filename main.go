@@ -10,14 +10,15 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 var listen = flag.String("l", ":8080", "Listening address")
 var configfile = flag.String("c", "", "Config file to load")
 var o *oneManager
-var conf *config
 
 func parseToken(buf []byte) (string, string) {
 	m := map[string]interface{}{}
@@ -54,7 +55,7 @@ func strlen(s string) int {
 
 func main() {
 	flag.Parse()
-	log.SetFlags(log.Lshortfile | log.Lmicroseconds)
+	log.SetFlags(log.Lshortfile | log.Lmicroseconds | log.Ldate)
 
 	if *configfile == "" {
 		log.Fatalln("Please specify the config file")
@@ -65,7 +66,7 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	conf = &config{}
+	conf := &config{}
 	if err := json.Unmarshal(configbuf, conf); err != nil {
 		log.Fatalln(err)
 	}
@@ -102,10 +103,33 @@ func main() {
 		conf.prefetchRegex = regexp.MustCompile(conf.Prefetch)
 	}
 
+	o = newOneManager(conf)
+
 	os.Mkdir("cache", 0755)
 	log.Println("Make cache dir: ./cache")
 
-	o = newOneManager(conf)
+	if o.prefetch != nil {
+		prefetched := int64(0)
+		log.Println("Counting prefetched")
+		filepath.Walk("cache", func(path string, info os.FileInfo, err error) error {
+			if info.IsDir() {
+				return nil
+			}
+
+			name := info.Name()
+			switch strings.ToLower(name[strings.LastIndex(name, "-")+1:]) {
+			case "readme.md", "readme", "readme.txt", "readme.htm", "readme.html":
+				os.Remove(path)
+				return nil
+			}
+
+			prefetched += info.Size()
+			o.prefetch.AddWeight(path, true, info.Size())
+			return nil
+		})
+		log.Println("Prefetched:", prefetched, "bytes")
+	}
+
 	http.HandleFunc("/authcallback", o.GetTokenCallback)
 	http.HandleFunc("/", Main)
 

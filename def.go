@@ -10,6 +10,7 @@ type _folder struct {
 }
 
 type driveItem struct {
+	isHidden             bool
 	DownloadURL          string `json:"@microsoft.graph.downloadUrl"`
 	CreatedDateTime      string `json:"createdDateTime"`
 	ID                   string `json:"id"`
@@ -65,6 +66,8 @@ type config struct {
 	Prefetch      string
 	prefetchRegex *regexp.Regexp
 	Favicon       string
+	DisableReadme bool
 	CacheSize     int
 	CacheTTL      int
+	PrefetchSize  int
 }

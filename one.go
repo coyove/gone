@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -45,12 +46,15 @@ type oneManager struct {
 	httpClient      *http.Client
 	dirTemplate     *template.Template
 	cache           *lru.Cache
-	icons           map[string][]byte
 	cacheTTL        int64
+	prefetch        *lru.Cache
+	icons           map[string][]byte
+	conf            *config
 }
 
 func newOneManager(conf *config) *oneManager {
 	o := &oneManager{}
+	o.conf = conf
 	o.client.id = conf.ClientID
 	o.client.secret = conf.ClientSecret
 	o.client.redir = conf.RedirURL
@@ -66,7 +70,14 @@ func newOneManager(conf *config) *oneManager {
 	}
 
 	o.cache = lru.NewCache(int64(conf.CacheSize))
-	o.cacheTTL = 60
+	o.cacheTTL = int64(conf.CacheTTL)
+	o.prefetch = lru.NewCache(int64(conf.PrefetchSize) * 1024 * 1024)
+	o.prefetch.OnEvicted = func(k lru.Key, v interface{}) {
+		go func() {
+			time.Sleep(time.Second)
+			os.Remove(k.(string))
+		}()
+	}
 	o.icons = DefaultIcons
 
 	buf, _ := ioutil.ReadFile(o.client.id + ".token")
@@ -76,7 +87,7 @@ func newOneManager(conf *config) *oneManager {
 		o.access = parts[1]
 		o.refresh = parts[2]
 		o.Restart()
-		log.Println("Preloaded:", o.lastRefreshed)
+		log.Println("Preloaded from ", o.client.id, ".token:", time.Unix(o.lastRefreshed, 0))
 	}
 	return o
 }
@@ -169,7 +180,7 @@ func (o *oneManager) Restart() {
 				}
 
 				o.lastRefreshed = time.Now().Unix()
-				log.Println("New token is OK at", o.lastRefreshed)
+				log.Println("New token is OK at", time.Now())
 				s.callback <- stateOK
 			case <-o.exit:
 				log.Println("Old dying")
