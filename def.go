@@ -53,16 +53,18 @@ type driveItems struct {
 }
 
 type config struct {
-	ClientID     string
-	ClientSecret string
-	RedirURL     string
-	redir        *url.URL
-	Password     string
-	Header       string
-	Footer       string
-	Ignore       string
-	Favicon      string
-	ignoreRegex  *regexp.Regexp
-	CacheSize    int
-	CacheTTL     int
+	ClientID      string
+	ClientSecret  string
+	RedirURL      string
+	redir         *url.URL
+	Password      string
+	Header        string
+	Footer        string
+	Ignore        string
+	ignoreRegex   *regexp.Regexp
+	Prefetch      string
+	prefetchRegex *regexp.Regexp
+	Favicon       string
+	CacheSize     int
+	CacheTTL      int
 }

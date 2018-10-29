@@ -2,10 +2,14 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha1"
 	"fmt"
 	"html/template"
+	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
@@ -48,6 +52,7 @@ func _orderDesc(b bool) bool { return !b }
 func Main(w http.ResponseWriter, r *http.Request) {
 	if img := r.FormValue("image"); img != "" {
 		w.Header().Add("Content-Type", "image/png")
+		w.Header().Add("Cache-Control", "max-age=31536000")
 		w.Write(o.icons[img])
 		return
 	}
@@ -94,6 +99,52 @@ func Main(w http.ResponseWriter, r *http.Request) {
 	if x.Error.Message != "" {
 		writeError(w, x.Error.Message)
 		return
+	}
+
+	fn := r.FormValue("file")
+	if fn != "" && conf.prefetchRegex != nil && conf.prefetchRegex.MatchString(fn) {
+		for _, item := range x.Values {
+			if item.Name == fn {
+				hash := fmt.Sprintf("%x", sha1.Sum([]byte(fn)))
+				cachepath := "cache/" + hash[:2] + "/" + hash[2:4]
+				os.MkdirAll(cachepath, 0755)
+				cachepath += "/" + hash[4:] + filepath.Ext(fn)
+
+				if _, err := os.Stat(cachepath); err == nil {
+					http.ServeFile(w, r, cachepath)
+					return
+				}
+
+				resp, err := o.httpClient.Get(item.DownloadURL)
+				if err != nil {
+					writeError(w, err.Error())
+					return
+				}
+
+				for k, vs := range resp.Header {
+					if k == "Content-Disposition" {
+						continue
+					}
+					h := w.Header()
+					for _, v := range vs {
+						h.Add(k, v)
+					}
+				}
+
+				cachefile, err := os.OpenFile(cachepath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0755)
+				var writer io.Writer
+				if err == nil {
+					writer = io.MultiWriter(w, cachefile)
+					defer cachefile.Close()
+				} else {
+					writer = w
+				}
+
+				io.Copy(writer, resp.Body)
+				resp.Body.Close()
+				return
+			}
+		}
 	}
 
 	upath, _ := url.PathUnescape(path)
@@ -200,7 +251,7 @@ Last token at %s
 </html>`,
 		runtime.GOOS,
 		conf.redir.Hostname(),
-		time.Unix(o.lastRefreshed, 0).Format("15:04"),
+		time.Unix(o.lastRefreshed, 0).UTC().Format("15:04"),
 		conf.Footer)))
 
 }

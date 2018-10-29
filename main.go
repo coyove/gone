@@ -98,6 +98,13 @@ func main() {
 		conf.ignoreRegex = regexp.MustCompile(conf.Ignore)
 	}
 
+	if conf.Prefetch != "" {
+		conf.prefetchRegex = regexp.MustCompile(conf.Prefetch)
+	}
+
+	os.Mkdir("cache", 0755)
+	log.Println("Make cache dir: ./cache")
+
 	o = newOneManager(conf)
 	http.HandleFunc("/authcallback", o.GetTokenCallback)
 	http.HandleFunc("/", Main)
