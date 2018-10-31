@@ -66,6 +66,7 @@ type config struct {
 	Prefetch      string
 	prefetchRegex *regexp.Regexp
 	Favicon       string
+	TopBackRedir  string
 	DisableReadme bool
 	CacheSize     int
 	CacheTTL      int

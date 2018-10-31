@@ -12,13 +12,11 @@ import (
 	"net/url"
 	"os"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/coyove/common/lru"
-	"github.com/russross/blackfriday"
 )
 
 func writeError(w http.ResponseWriter, msg string) {
@@ -63,15 +61,6 @@ func writeInfo(w http.ResponseWriter) {
 	})
 	w.Write([]byte("</pre></body></html>"))
 }
-
-func _orderAsc(b bool) bool  { return b }
-func _orderDesc(b bool) bool { return !b }
-
-type dummyWriter struct{ bytes.Buffer }
-
-func (d *dummyWriter) Header() http.Header { return http.Header{} }
-
-func (d *dummyWriter) WriteHeader(statusCode int) {}
 
 func serveFile(w http.ResponseWriter, r *http.Request, fn string, values []*driveItem) bool {
 	for _, item := range values {
@@ -150,11 +139,16 @@ func Main(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if strings.HasPrefix(r.RequestURI, "/favicon.ico") && o.conf.Favicon != "" {
-		http.ServeFile(w, r, o.conf.Favicon)
+	if strings.HasPrefix(r.RequestURI, "/favicon.ico") {
+		if o.conf.Favicon != "" {
+			http.ServeFile(w, r, o.conf.Favicon)
+		} else {
+			http.Redirect(w, r, "https://onedrive.live.com/favicon.ico", http.StatusTemporaryRedirect)
+		}
 		return
 	}
 
+	// format the path
 	path := r.URL.Path[1:]
 	order, revorder, orderfunc := r.FormValue("o"), "d", _orderAsc
 	if order == "d" {
@@ -175,7 +169,9 @@ func Main(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// we will have a path that always start with / and end with /
+	start := time.Now()
 	x := o.List(path)
+	elapsed := time.Now().Sub(start)
 
 	if x.Error.Message != "" {
 		writeError(w, x.Error.Message)
@@ -190,14 +186,10 @@ func Main(w http.ResponseWriter, r *http.Request) {
 	}
 
 	upath, _ := url.PathUnescape(path)
-	favicon := `<link rel="shortcut icon" href="https://onedrive.live.com/favicon.ico">`
-	if o.conf.Favicon != "" {
-		favicon = ""
-	}
 	w.Write([]byte(fmt.Sprintf(`<html>
-<head><meta charset="UTF-8">%s<title>Index of %s</title></head>
+<head><meta charset="UTF-8"><title>Index of %s</title></head>
 <body bgcolor="white">
-<h1 id=indexof>Index of %s</h1>%s<pre>`, favicon, upath, upath, o.conf.Header)))
+<h1 id=indexof>Index of %s</h1>%s<pre>`, upath, upath, o.conf.Header)))
 
 	maxNameLen, maxSizeLen := 6, 2
 	for i := len(x.Values) - 1; i >= 0; i-- {
@@ -220,50 +212,21 @@ func Main(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	switch r.FormValue("c") {
-	case "n":
-		sort.Slice(x.Values, func(i, j int) bool {
-			if x.Values[i].Folder != nil && x.Values[j].Folder == nil {
-				return true
-			}
-			if x.Values[i].Folder == nil && x.Values[j].Folder != nil {
-				return false
-			}
-			return orderfunc(x.Values[i].Name < x.Values[j].Name)
-		})
-	case "t":
-		sort.Slice(x.Values, func(i, j int) bool {
-			if x.Values[i].Folder != nil && x.Values[j].Folder == nil {
-				return true
-			}
-			if x.Values[i].Folder == nil && x.Values[j].Folder != nil {
-				return false
-			}
-			return orderfunc(x.Values[i].LastModifiedDateTime < x.Values[j].LastModifiedDateTime)
-		})
-	case "s":
-		sort.Slice(x.Values, func(i, j int) bool {
-			if x.Values[i].Folder != nil && x.Values[j].Folder == nil {
-				return true
-			}
-			if x.Values[i].Folder == nil && x.Values[j].Folder != nil {
-				return false
-			}
-			if x.Values[i].Folder == nil && x.Values[j].Folder == nil {
-				return orderfunc(x.Values[i].Size < x.Values[j].Size)
-			}
-			return orderfunc(x.Values[i].Folder.ChildCount < x.Values[j].Folder.ChildCount)
-		})
-	}
+	// sort values based on user's choice
+	sortValues(r.FormValue("c"), x.Values, orderfunc)
 
 	w.Write([]byte(
-		`<img src="?image=empty.png"> <a href="?c=n&o=` + revorder + `">Name</a>` + strings.Repeat(" ", maxNameLen+1-4) +
+		`<img src="?image=empty.png"> <a href="?c=n&o=` + revorder + `">Name</a>` + spaces(maxNameLen+1-4) +
 			`<a href="?c=t&o=` + revorder + `">Last Modified</a>   ` +
-			strings.Repeat(" ", maxSizeLen+2-4) + `<a href="?c=s&o=` + revorder + `">Size</a>`,
+			spaces(maxSizeLen+2-4) + `<a href="?c=s&o=` + revorder + `">Size</a>`,
 	))
 
-	w.Write([]byte(`<hr><img src="?image=back.png"> <a href="../">Parent Directory</a>` + strings.Repeat(" ", maxSizeLen+maxNameLen+16+3-16-1) + `-
-`))
+	up := "../"
+	if path == "/" && o.conf.TopBackRedir != "" {
+		up = o.conf.TopBackRedir
+	}
+	w.Write([]byte(fmt.Sprintf(`<hr><img src="?image=back.png"> <a href="%s">Parent Directory</a>%s-
+`, up, spaces(maxSizeLen+maxNameLen+16+3-16-1))))
 
 	var readme []byte
 	for _, item := range x.Values {
@@ -286,30 +249,12 @@ func Main(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if !o.conf.DisableReadme {
-			switch strings.ToLower(name) {
-			case "readme.md":
-				dw := &dummyWriter{}
-				if serveFile(dw, r, name, x.Values) {
-					readme = blackfriday.MarkdownCommon(dw.Bytes())
-				}
-			case "readme.txt", "readme":
-				dw := &dummyWriter{}
-				dw.WriteString("<pre>")
-				if serveFile(dw, r, name, x.Values) {
-					dw.WriteString("</pre>")
-					readme = dw.Bytes()
-				}
-			case "readme.html", "readme.htm":
-				dw := &dummyWriter{}
-				if serveFile(dw, r, name, x.Values) {
-					readme = dw.Bytes()
-				}
-			}
+			readme = renderReadme(name, x.Values, r)
 		}
 
 		w.Write([]byte(fmt.Sprintf("<img src='?image=%s'> ", nameIcon(name, item.Folder != nil))))
 		w.Write([]byte(fmt.Sprintf("<a href='%s'>%s</a>", href, template.HTMLEscapeString(name))))
-		w.Write(bytes.Repeat([]byte(" "), maxNameLen+1-strlen(name)))
+		w.Write([]byte(spaces(maxNameLen + 1 - strlen(name))))
 		w.Write([]byte(item.LastModifiedDateTime[:10] + " " + item.LastModifiedDateTime[11:16]))
 
 		size := prettySize(item.Size)
@@ -326,11 +271,11 @@ func Main(w http.ResponseWriter, r *http.Request) {
 	w.Write(readme)
 	w.Write([]byte(o.conf.Footer))
 	w.Write([]byte(fmt.Sprintf(`
-<address><a href="https://github.com/coyove/gone" target=_blank>Gone</a> (%s) Server at %s,
-Last token at %s
+<address><a href="https://github.com/coyove/gone" target=_blank>Gone</a> (%s) Server in %.2fs,
+Last token lives %ds
 </address>`,
 		runtime.GOOS,
-		o.conf.redir.Hostname(),
-		time.Unix(o.lastRefreshed, 0).UTC().Format("15:04"))))
+		elapsed.Seconds(),
+		time.Now().Unix()-o.lastRefreshed)))
 	w.Write([]byte("</body></html>"))
 }
